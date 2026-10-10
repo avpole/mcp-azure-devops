@@ -140,7 +140,14 @@ This project implements an MCP server that exposes tools for querying and managi
 
 ## Available Tools
 
-Both hosts expose the same 49 tools. All tools accept an optional `organization` selector; see [Multiple Organizations / PATs](#multiple-organizations--pats).
+Both hosts expose the same 51 tools. All tools accept an optional `organization` selector; see [Multiple Organizations / PATs](#multiple-organizations--pats).
+
+### Project Tools
+
+| Tool | Description |
+|------|-------------|
+| `get_projects` | Lists all projects in the organization or collection (with optional `stateFilter` and `top`) |
+| `get_project_details` | Gets details of a specific project by name or ID, including capabilities and the default team |
 
 ### Work Item Tools
 
