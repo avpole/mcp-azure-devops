@@ -691,4 +691,28 @@ public interface IAzureDevOpsService
         CancellationToken cancellationToken = default);
 
     #endregion
+
+    #region Project Operations
+
+    /// <summary>
+    /// Gets the projects in the selected organization/collection, paging through the results automatically.
+    /// </summary>
+    /// <param name="stateFilter">Project state filter: "wellFormed" (default), "all", "new", "createPending", or "deleted".</param>
+    /// <param name="top">Maximum number of projects to return (optional; all matching projects are returned when omitted).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>List of projects.</returns>
+    Task<IReadOnlyList<ProjectDto>> GetProjectsAsync(
+        string? stateFilter = null,
+        int? top = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Gets details of a specific project by name or ID, including capabilities and the default team.
+    /// </summary>
+    /// <param name="projectNameOrId">The project name or ID.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The project details, or null when the project does not exist.</returns>
+    Task<ProjectDetailsDto?> GetProjectDetailsAsync(string projectNameOrId, CancellationToken cancellationToken = default);
+
+    #endregion
 }

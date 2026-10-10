@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using Microsoft.TeamFoundation.Build.WebApi;
+using Microsoft.TeamFoundation.Core.WebApi;
 using Microsoft.TeamFoundation.SourceControl.WebApi;
 using Microsoft.TeamFoundation.Wiki.WebApi;
 using Microsoft.TeamFoundation.WorkItemTracking.WebApi;
@@ -34,6 +35,8 @@ public sealed class AzureDevOpsService : IAzureDevOpsService, IDisposable
         GetOrganizationContext().Connection.GetClientAsync<BuildHttpClient>(cancellationToken);
     private Task<WikiHttpClient> GetWikiClientAsync(CancellationToken cancellationToken) =>
         GetOrganizationContext().Connection.GetClientAsync<WikiHttpClient>(cancellationToken);
+    private Task<ProjectHttpClient> GetProjectClientAsync(CancellationToken cancellationToken) =>
+        GetOrganizationContext().Connection.GetClientAsync<ProjectHttpClient>(cancellationToken);
     private string? DefaultProject => GetOrganizationContext().DefaultProject;
     private string OrganizationUrl => GetOrganizationContext().OrganizationUrl;
 
@@ -2968,6 +2971,166 @@ public sealed class AzureDevOpsService : IAzureDevOpsService, IDisposable
                 RemoteUrl = sp.RemoteUrl,
                 IsParentPage = sp.IsParentPage
             }).ToList()
+        };
+    }
+
+    #endregion
+
+    #region Project Operations
+
+    private const int ProjectsPageSize = 2000;
+    private const int ProjectsSafetyLimit = 10000;
+
+    public async Task<IReadOnlyList<ProjectDto>> GetProjectsAsync(
+        string? stateFilter = null,
+        int? top = null,
+        CancellationToken cancellationToken = default)
+    {
+        var state = ParseProjectState(stateFilter);
+        if (top is <= 0)
+        {
+            throw new ArgumentException("The maximum number of projects must be greater than zero.", nameof(top));
+        }
+
+        _logger.LogInformation("Getting projects (state filter: {StateFilter})", state);
+
+        try
+        {
+            var projectClient = await GetProjectClientAsync(cancellationToken);
+            var projects = new List<ProjectDto>();
+            string? continuationToken = null;
+
+            while (true)
+            {
+                var pageSize = ProjectsPageSize;
+                if (top is int limit)
+                {
+                    pageSize = Math.Min(ProjectsPageSize, limit - projects.Count);
+                }
+
+                // The generated Core client predates cancellation tokens and accepts only userState.
+                var page = await projectClient.GetProjects(
+                    stateFilter: state,
+                    top: pageSize,
+                    skip: null,
+                    userState: null,
+                    continuationToken: continuationToken);
+
+                projects.AddRange(page.Select(MapToProjectDto));
+
+                if (page.Count == 0) break;
+
+                continuationToken = (page as PagedList<TeamProjectReference>)?.ContinuationToken;
+                if (string.IsNullOrEmpty(continuationToken)) break;
+
+                if (top is int requested && projects.Count >= requested) break;
+
+                if (projects.Count >= ProjectsSafetyLimit)
+                {
+                    _logger.LogWarning("Stopped listing projects after {Count} projects (safety limit)", projects.Count);
+                    break;
+                }
+            }
+
+            if (top is int trimLimit && projects.Count > trimLimit)
+            {
+                projects = projects.Take(trimLimit).ToList();
+            }
+
+            _logger.LogInformation("Found {Count} projects", projects.Count);
+
+            return projects;
+        }
+        catch (Exception ex)
+        {
+            LogOperationError(ex, "Error getting projects");
+            throw;
+        }
+    }
+
+    public async Task<ProjectDetailsDto?> GetProjectDetailsAsync(string projectNameOrId, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(projectNameOrId);
+        var nameOrId = projectNameOrId.Trim();
+
+        _logger.LogInformation("Getting project details for: {ProjectNameOrId}", nameOrId);
+
+        var projectClient = await GetProjectClientAsync(cancellationToken);
+
+        try
+        {
+            // The generated Core client predates cancellation tokens and accepts only userState.
+            var project = await projectClient.GetProject(nameOrId, includeCapabilities: true);
+            return MapToProjectDetailsDto(project);
+        }
+        catch (Exception ex) when (
+            ex is ProjectDoesNotExistException or ProjectDoesNotExistWithNameException
+            || AzureDevOpsErrorClassifier.IsNotFound(ex))
+        {
+            // The Core client throws ProjectDoesNotExist*Exception without an HTTP status code.
+            _logger.LogWarning("Project '{ProjectNameOrId}' not found", nameOrId);
+            return null;
+        }
+    }
+
+    private static ProjectState ParseProjectState(string? stateFilter)
+    {
+        if (string.IsNullOrWhiteSpace(stateFilter))
+        {
+            return ProjectState.WellFormed;
+        }
+
+        if (Enum.TryParse<ProjectState>(stateFilter.Trim(), ignoreCase: true, out var state) &&
+            state is not (ProjectState.Unchanged or ProjectState.Deleting))
+        {
+            return state;
+        }
+
+        throw new ArgumentException(
+            $"Unknown project state filter '{stateFilter}'. Use 'all', 'wellFormed', 'new', 'createPending', or 'deleted'.",
+            nameof(stateFilter));
+    }
+
+    private static ProjectDto MapToProjectDto(TeamProjectReference project)
+    {
+        return new ProjectDto
+        {
+            Id = project.Id.ToString(),
+            Name = project.Name,
+            Description = project.Description,
+            State = project.State.ToString(),
+            Visibility = project.Visibility.ToString(),
+            Revision = project.Revision,
+            Abbreviation = project.Abbreviation,
+            Url = project.Url,
+            LastUpdateTime = project.LastUpdateTime
+        };
+    }
+
+    private static ProjectDetailsDto MapToProjectDetailsDto(TeamProject project)
+    {
+        return new ProjectDetailsDto
+        {
+            Id = project.Id.ToString(),
+            Name = project.Name,
+            Description = project.Description,
+            State = project.State.ToString(),
+            Visibility = project.Visibility.ToString(),
+            Revision = project.Revision,
+            Abbreviation = project.Abbreviation,
+            Url = project.Url,
+            LastUpdateTime = project.LastUpdateTime,
+            DefaultTeam = project.DefaultTeam is null
+                ? null
+                : new ProjectTeamDto
+                {
+                    Id = project.DefaultTeam.Id.ToString(),
+                    Name = project.DefaultTeam.Name,
+                    Url = project.DefaultTeam.Url
+                },
+            Capabilities = project.Capabilities?.ToDictionary(
+                entry => entry.Key,
+                entry => (IReadOnlyDictionary<string, string>)entry.Value)
         };
     }
 

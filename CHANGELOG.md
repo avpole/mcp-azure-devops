@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Project tools `get_projects` and `get_project_details` for listing the projects of an organization/collection and reading a project's details, capabilities, and default team.
 - A .NET 10 STDIO host in `src/Viamus.Azure.Devops.Mcp.Stdio`, sharing Azure DevOps tools and configuration with the HTTP host through `Viamus.Azure.Devops.Mcp.Core`.
 - Centralized MCP tool errors with `isError`, actionable messages, stable error codes, HTTP status when available, and a transient-failure indicator for PAT/authentication, permission, resource, rate-limit, network, timeout, configuration, and unexpected failures.
 - Local HTTP and STDIO protocol integration tests, including a simulated Azure DevOps authentication failure over HTTP, safe handling of unsupported insecure Basic authentication, and continued tool discovery after failures.
